@@ -121,6 +121,27 @@
         .status-waiting { background: #e3f2fd; color: #1976d2; }
         .status-ready { background: #e8f5e9; color: #388e3c; }
         .status-urgent { background: #ffebee; color: #c62828; }
+        .usage-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .usage-item {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .usage-item label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        .usage-item input {
+            width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -149,6 +170,53 @@
                 <div class="value" id="todayAvailable">0</div>
                 <div class="label">팩</div>
             </div>
+        </div>
+
+        <!-- 새로 추가: 오늘 사용량 입력 -->
+        <div class="section">
+            <h2>🍖 0. 오늘 사용량 입력</h2>
+            <div class="usage-grid">
+                <div class="usage-item">
+                    <label>목살</label>
+                    <input type="number" id="usage목살" value="0" min="0" step="0.5">
+                </div>
+                <div class="usage-item">
+                    <label>삼겹살</label>
+                    <input type="number" id="usage삼겹살" value="0" min="0" step="0.5">
+                </div>
+                <div class="usage-item">
+                    <label>가브리살</label>
+                    <input type="number" id="usage가브리살" value="0" min="0" step="0.5">
+                </div>
+                <div class="usage-item">
+                    <label>항정살</label>
+                    <input type="number" id="usage항정살" value="0" min="0" step="0.5">
+                </div>
+            </div>
+            <div class="button-group">
+                <button onclick="recordUsage()">✅ 오늘 사용량 기록</button>
+            </div>
+            <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; color: #856404;">
+                <strong>💡 사용 방법:</strong> 오늘 실제로 사용한 양을 입력하고 "기록" 버튼을 누르면 자동으로 재고에서 차감됩니다.
+            </div>
+        </div>
+
+        <!-- 새로 추가: 사용 내역 -->
+        <div class="section">
+            <h2>📊 최근 사용 내역 (7일)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>날짜</th>
+                        <th>목살</th>
+                        <th>삼겹살</th>
+                        <th>가브리살</th>
+                        <th>항정살</th>
+                        <th>합계</th>
+                    </tr>
+                </thead>
+                <tbody id="usageHistory"></tbody>
+            </table>
         </div>
 
         <div class="section">
@@ -272,6 +340,7 @@
 
     <script>
         let orders = [];
+        let usageRecords = []; // 새로 추가: 사용 내역
         const dailyUsage = {'목살': 4, '삼겹살': 1, '가브리살': 1, '항정살': 1};
         const safetyStock = {'목살': 40, '삼겹살': 10, '가브리살': 10, '항정살': 10};
 
@@ -283,6 +352,95 @@
             updateAllTables();
             document.getElementById('orderDate').addEventListener('change', calculateDates);
         });
+
+        // 새로 추가: 오늘 사용량 기록
+        function recordUsage() {
+            const today = formatDate(new Date());
+            const meats = ['목살', '삼겹살', '가브리살', '항정살'];
+            const usage = {};
+            let totalUsage = 0;
+
+            meats.forEach(meat => {
+                const qty = parseFloat(document.getElementById(`usage${meat}`).value) || 0;
+                usage[meat] = qty;
+                totalUsage += qty;
+            });
+
+            if(totalUsage === 0) {
+                alert('⚠️ 사용량을 입력해주세요!');
+                return;
+            }
+
+            // 재고에서 차감 (가장 오래된 것부터)
+            meats.forEach(meat => {
+                let remainingUsage = usage[meat];
+                if(remainingUsage === 0) return;
+
+                const availableOrders = orders.filter(o => {
+                    if(o.meatType !== meat) return false;
+                    const agingDays = Math.ceil((new Date() - new Date(o.receiveDate)) / (1000*60*60*24));
+                    return agingDays >= 10 && agingDays <= 14 && o.quantity > 0;
+                }).sort((a, b) => new Date(a.receiveDate) - new Date(b.receiveDate));
+
+                for(let order of availableOrders) {
+                    if(remainingUsage === 0) break;
+                    
+                    if(order.quantity >= remainingUsage) {
+                        order.quantity -= remainingUsage;
+                        remainingUsage = 0;
+                    } else {
+                        remainingUsage -= order.quantity;
+                        order.quantity = 0;
+                    }
+                }
+
+                if(remainingUsage > 0) {
+                    alert(`⚠️ ${meat} 재고가 부족합니다! ${remainingUsage}팩 부족`);
+                }
+            });
+
+            // 사용 내역 저장
+            usageRecords.push({
+                date: today,
+                usage: usage
+            });
+
+            // 최근 30일만 보관
+            if(usageRecords.length > 30) {
+                usageRecords = usageRecords.slice(-30);
+            }
+
+            // 입력 필드 초기화
+            meats.forEach(meat => {
+                document.getElementById(`usage${meat}`).value = '0';
+            });
+
+            saveData();
+            updateAllTables();
+            alert('✅ 사용량 기록 완료!');
+        }
+
+        // 새로 추가: 사용 내역 표시
+        function updateUsageHistory() {
+            const tbody = document.getElementById('usageHistory');
+            const recent = usageRecords.slice(-7).reverse();
+            
+            tbody.innerHTML = recent.map(record => {
+                const total = Object.values(record.usage).reduce((sum, val) => sum + val, 0);
+                return `<tr>
+                    <td>${record.date}</td>
+                    <td>${record.usage['목살']}팩</td>
+                    <td>${record.usage['삼겹살']}팩</td>
+                    <td>${record.usage['가브리살']}팩</td>
+                    <td>${record.usage['항정살']}팩</td>
+                    <td><strong>${total}팩</strong></td>
+                </tr>`;
+            }).join('');
+
+            if(recent.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#999;">아직 사용 내역이 없습니다.</td></tr>';
+            }
+        }
 
         function calculateDates() {
             const orderDate = new Date(document.getElementById('orderDate').value);
@@ -330,6 +488,7 @@
             updateStockStatus();
             calculateWeeklyPlan();
             updateDashboard();
+            updateUsageHistory(); // 새로 추가
         }
 
         function updateOrderHistory() {
@@ -367,7 +526,7 @@
             const today = new Date();
             const available = orders.filter(order => {
                 const agingDays = Math.ceil((today - new Date(order.receiveDate)) / (1000*60*60*24));
-                return agingDays >= 10 && agingDays <= 14;
+                return agingDays >= 10 && agingDays <= 14 && order.quantity > 0;
             }).sort((a, b) => new Date(a.receiveDate) - new Date(b.receiveDate));
             tbody.innerHTML = available.map((order, index) => {
                 const agingDays = Math.ceil((today - new Date(order.receiveDate)) / (1000*60*60*24));
@@ -518,15 +677,22 @@
 
         function saveData() {
             localStorage.setItem('meatInventory', JSON.stringify(orders));
+            localStorage.setItem('usageRecords', JSON.stringify(usageRecords)); // 새로 추가
         }
 
         function loadData() {
             const saved = localStorage.getItem('meatInventory');
             if(saved) orders = JSON.parse(saved);
+            const savedUsage = localStorage.getItem('usageRecords'); // 새로 추가
+            if(savedUsage) usageRecords = JSON.parse(savedUsage);
         }
 
         function exportData() {
-            const dataStr = JSON.stringify(orders, null, 2);
+            const data = {
+                orders: orders,
+                usageRecords: usageRecords // 새로 추가
+            };
+            const dataStr = JSON.stringify(data, null, 2);
             const dataBlob = new Blob([dataStr], {type: 'application/json'});
             const url = URL.createObjectURL(dataBlob);
             const link = document.createElement('a');
@@ -544,7 +710,9 @@
                 const reader = new FileReader();
                 reader.onload = event => {
                     try {
-                        orders = JSON.parse(event.target.result);
+                        const data = JSON.parse(event.target.result);
+                        orders = data.orders || data; // 하위 호환성
+                        usageRecords = data.usageRecords || []; // 새로 추가
                         saveData();
                         updateAllTables();
                         alert('✅ 데이터 불러오기 완료!');
@@ -560,6 +728,7 @@
         function resetAll() {
             if(confirm('⚠️ 모든 데이터가 삭제됩니다. 계속하시겠습니까?')) {
                 orders = [];
+                usageRecords = []; // 새로 추가
                 saveData();
                 updateAllTables();
                 alert('✅ 초기화 완료');
